@@ -1,0 +1,1269 @@
+---
+title: "**XỬ LÝ SỐ LIỆU THỐNG KÊ - FINAL PROJECT**" 
+output:
+  word_document: default
+  pdf_document:
+    latex_engine: pdflatex
+    keep_tex: true
+  html_document: default
+date: "2024-07-06"
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+**Các thành viên nhóm:**
+
+1.  Trần Thị Bích Tuyền - 21280059
+
+2.  Nguyễn Thị Yến Như - 21280082
+
+3.  Nguyễn Hoài Linh - 21280097
+
+4.  Lê Nguyễn Hoàng Uyên - 21280118
+
+5.  Trần Trịnh Mai Vy - 21280122
+
+# Giới Thiệu.
+
+Dịch vụ cho thuê xe đạp đã được triển khai ở nhiều thành phố lớn trên thế giới nhằm nâng cao sự thoải mái và tiện lợi trong việc di chuyển.
+Tại Seoul, dịch vụ cho thuê xe đạp không chỉ giúp giảm thiểu thời gian chờ đợi mà còn đóng vai trò quan trọng trong việc giảm tắc nghẽn giao thông và bảo vệ môi trường.
+
+Một thách thức lớn đối với các nhà quản lý dịch vụ là đảm bảo nguồn cung cấp xe đạp ổn định và đủ để đáp ứng nhu cầu của công chúng vào mọi thời điểm.
+Việc dự đoán chính xác số lượng xe đạp cần thiết mỗi giờ là yếu tố then chốt để cung cấp dịch vụ hiệu quả và giảm thiểu thời gian chờ đợi của khách hàng.
+
+Với dữ liệu \`SeoulBikeData.csv\` đã cho trước.
+Mục tiêu của dự án này là phân tích và dự đoán số lượng xe đạp cần thiết mỗi giờ để đảm bảo cung cấp dịch vụ thuê xe đạp ổn định, góp phần nâng cao trải nghiệm của người sử dụng và tối ưu hóa hoạt động kinh doanh của công ty cung cấp dịch vụ.
+
+# 1. Import library
+
+```{r}
+library(boot)
+library(tidyverse)
+library(matrixStats)
+library(lubridate)
+library(janitor)
+library(ggplot2)
+library(corrplot)
+library(dplyr)
+library(splines2)
+library(mgcv)
+library(mgcViz)
+library(leaps)
+library(gridExtra)
+library(grid)
+library(MASS)
+library(leaps)
+library(lmPerm)
+library(corrplot)
+library(splines2)
+library(DataExplorer)
+library(caret)
+library(mgcv)
+library(mgcViz)
+library(splines)
+library(lmPerm)
+library(readr)
+library(fastDummies) 
+library(car)
+
+```
+
+# 2. Read data
+
+```{r}
+locale=locale(encoding="latin1")
+data <- read_csv("SeoulBikeData.csv", locale = locale)
+head(data)
+data <- data |> janitor::clean_names()
+glimpse(data)
+```
+
+# 3. EDA.
+
+## 3.1 Bảng tổng hợp dữ liệu.
+
+```{r}
+summary(data)
+```
+
+## 3.2 Xử lí dữ liệu.
+
+### 3.2.1 Kiểm tra tổng thể dữ liệu.
+
+```{r}
+# Hàm để lấy thông tin dữ liệu bao gồm loại dữ liệu, giá trị duy nhất, và giá trị null
+datainfo <- function(data) {
+  # Tạo một khung dữ liệu để lưu trữ thông tin
+  temp_ps <- data.frame(matrix(ncol = 6, nrow = ncol(data)))
+  colnames(temp_ps) <- c("Column_Name", "DataType", "Non_null_Values", "Unique_Values", "NaN_Values_Percentage", "Duplicates")
+  
+  # Điền thông tin vào khung dữ liệu
+  temp_ps$Column_Name <- colnames(data)  # Lấy tên các cột
+  temp_ps$DataType <- sapply(data, class)  
+  # Lấy loại dữ liệu sử dụng sapply
+  temp_ps$Non_null_Values <- sapply(data, function(x) sum(!is.na(x)))  
+  # Đếm số giá trị không null sử dụng sapply và is.na
+  temp_ps$Unique_Values <- sapply(data, function(x) length(unique(na.omit(x))))  
+  # Đếm số giá trị duy nhất loại bỏ các giá trị NA
+  temp_ps$NaN_Values <- sapply(data, function(x) sum(is.na(x)))  
+  # Đếm số giá trị null sử dụng sapply và is.na
+  temp_ps$NaN_Values_Percentage <- (temp_ps$NaN_Values / nrow(data)) * 100  
+  # Tính tỷ lệ phần trăm của các giá trị null
+  
+  # Đếm số lượng bản ghi bị trùng lặp trong dữ liệu
+  temp_ps$Duplicates <- sum(duplicated(data))
+  
+  # Trả về khung dữ liệu chứa thông tin
+  return(temp_ps)
+}
+data_info <- datainfo(data)
+print(data_info)
+```
+
+=\> Bộ dữ liệu không chứa NaN
+
+### 3.2.2 Kiểm tra hàm functioning_day với rented_bike_coun
+
+```{r}
+result <- data %>%
+  group_by(functioning_day) %>%
+  summarise(rented_bike_count = sum(rented_bike_count, na.rm = TRUE)) %>%
+  arrange(desc(rented_bike_count)) %>%
+  ungroup()
+print(result)
+```
+
+```{r}
+summary(factor(data$functioning_day))
+```
+
+=\> **Nhận xét**: Theo thống kê tóm tắt của Working_day, có 295 ngày không hoạt động trong tập dữ liệu.
+Những ngày này sẽ không có số lượng xe đạp vì không thể thuê.
+Do đó, các điểm dữ liệu của ngày không hoạt động sẽ bị xóa khỏi tập dữ liệu vì điều này không liên quan đến mục đích của bài toán.
+Tập dữ liệu hiện còn lại 8465 điểm dữ liệu.
+
+```{r}
+data <- data %>%
+  filter(functioning_day != "No") %>% dplyr::select(-functioning_day)
+```
+
+### 3.2.3 Chuyển đổi kiểu dữ liệu cho các biến holiday, seasons.
+
+```{r}
+  data <- data |> mutate(
+  holiday = as.factor(holiday),
+  seasons = as.factor(seasons)
+)
+```
+
+### 3.2.4 Tách thời gian thành ngày, tháng, năm và thêm cột ngày trong tuần.
+
+```{r}
+data <- data %>%
+  mutate(
+    Date = dmy(date),  
+    # Chuyển đổi cột 'date' sang định dạng ngày tháng
+    year = year(Date),
+    month = month(Date),
+    day = day(Date)
+  )
+# Loại bỏ cột 'Date'
+data <- subset(data, select = -c(Date))
+# Tạo cột day bằng cách kết hợp year, month và day
+data$full_date <- as.Date(with(data, paste(year, month, day, sep = "-")), format = "%Y-%m-%d")
+
+# Thêm cột day_of_week dựa trên cột full_date
+data$day_of_week <- weekdays(data$full_date)
+
+# Loại bỏ cột 'full_date'
+data <- subset(data, select = -c(full_date))
+
+# Hiển thị kết quả
+print(head(data))
+```
+
+## 3.3 Trực quan dữ liệu.
+
+### 3.3.1 Vẽ biểu đồ boxplot nhằm xem xét phân phối của số lượng xe đạp được thuê (rented_bike_count) vào từng giờ trong ngày (hour)
+
+```{r}
+# Vẽ biểu đồ boxplot
+boxplot(data$rented_bike_count ~ data$hour, 
+        xlab = "Hours", 
+        ylab = "Bike Count",
+        col = rainbow(length(unique(data$hour))))  
+```
+
+Biểu đồ ở trên cho thấy số lượng xe đạp được thuê thay đổi theo giờ.
+Dễ dàng nhận thấy từ biểu đồ rằng nhiều xe đạp được thuê nhất từ 7 giờ sáng đến 9 giờ sáng.
+Sau đó, số lượng xe thuê duy trì tương đối ổn định cho đến 15:00 chiều và bắt đầu tăng trở lại sau 15:00 chiều.
+
+### 3.3.2 Vẽ biểu đồ thanh cho số lượng xe đạp thuê theo ngày trong tuần.
+
+```{r}
+# Biểu đồ thanh cho số lượng xe đạp thuê theo ngày trong tuần 
+ggplot(data, aes(x = day_of_week, y = rented_bike_count, fill = day_of_week)) +
+  geom_bar(stat = "identity", color = "#7AC5CD") +
+  labs(
+    title = "Số lượng xe đạp thuê theo ngày trong tuần",
+    x = "Ngày trong tuần",
+    y = "Số lượng xe đạp thuê"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.position = "none"
+  ) + scale_fill_brewer(palette = "Set3") 
+```
+
+### 3.3.3 Vẽ biểu đồ boxplot cho số lượng xe đạp thuê theo tháng trong năm.
+
+```{r}
+# Vẽ biểu đồ boxplot
+boxplot(data$rented_bike_count ~ data$month, 
+        xlab = "Month", 
+        ylab = "Bike Count",
+        col = rainbow(length(unique(data$month)))) 
+```
+
+**=\> Nhận xét:** Qua biểu đồ ta thấy tháng 6 là tháng có số lượng xe đạp thuê cao nhất, trong khi tháng 1 và tháng 12 là các tháng có số lượng xe đạp thuê thấp nhất.
+
+### 3.3.4 Vẽ biểu đồ boxplot cho số lượng xe đạp thuê theo mùa.
+
+```{r}
+# Vẽ biểu đồ boxplot
+boxplot(data$rented_bike_count ~ data$seasons, 
+        xlab = "Hours", 
+        ylab = "Bike Count",
+        col = rainbow(length(unique(data$hour))))  
+```
+
+=\> **Nhận xét**: Ta có thể thấy rằng trong những thời điểm thời tiết tốt hơn như mùa hè, mọi người thường thích đạp xe hơn và vào mùa đông xe đạp được thuê với giá thấp nhất với số lượng nhu cầu thấp hơn 500 chiếc.
+Điều này có thể là do thời tiết lạnh cũng như tuyết trong mùa đông.
+Có một số ngoại lệ với mật độ cao hơn các mùa còn lại khi nhu cầu xe đạp trong Mùa đông là trên 500.
+Đây có thể là một số lý do cơ bản chẳng hạn như ngày có thời tiết tốt hơn những ngày khác trong mùa đông.
++ Vào mùa thu, nhu cầu xe đạp cao hơn mùa xuân mặc dù chúng tôi dự kiến nhu cầu vào mùa xuân sẽ cao hơn mùa thu.
+Điều này có thể là do mùa Xuân có nhiều ngày mưa hơn mùa Thu.
+
+Việc sử dụng xe đạp cao nhất vào mùa thu và mùa xuân, với trung vị và sự biến đổi tương tự nhau.
+Mùa hè có trung vị thấp hơn nhưng sự biến đổi số lượng xe đạp cao hơn.
+Mùa đông cho thấy việc sử dụng xe đạp thấp nhất với sự biến đổi ít nhất.
+
+### 3.3.5 Vẽ biểu đồ boxplot cho số lượng xe đạp thuê theo ngày lễ.
+
+```{r}
+# Vẽ biểu đồ boxplot
+boxplot(data$rented_bike_count ~ data$holiday, 
+        xlab = "Hours", 
+        ylab = "Bike Count",
+        col = rainbow(length(unique(data$hour))))  
+```
+
+=\> **Nhận xét**: Ta có thấy rằng nhu cầu về xe đạp cao hơn vào những ngày không phải ngày nghỉ lễ, điều đó có nghĩa là hầu hết người dùng có thể thuê xe đạp vì những lý do khác ngoài mục đích giải trí.
+
+### 3.3.6 Vẽ biểu đồ boxplot cho số lượng xe đạp thuê theo ngày trong tuần phân loại ngày lễ.
+
+```{r}
+ggplot(data, aes(x = day_of_week, y = rented_bike_count, fill = holiday)) +
+  geom_boxplot() +
+  labs(title = "Số lượng xe đạp thuê theo ngày trong tuần và tình trạng ngày lễ",
+       x = "Ngày trong tuần",
+       y = "Số lượng xe đạp thuê") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+**=\> Nhận xét:**
+
+-   Biểu đồ cho thấy số lượng xe đạp thuê vào các ngày lễ cuối tuần thường cao hơn so với ngày cuối tuần  không phải ngày lễ .
+    Ngày cuối tuần (thứ Bảy và Chủ Nhật) thường có nhiều hoạt động giải trí và du lịch, do đó, số lượng xe đạp thuê vào các ngày này cao và biến động lớn.
+
+-   Nếu một ngày lễ rơi vào cuối tuần, có thể tăng cường thêm hoạt động ngoài trời, dẫn đến số lượng xe đạp thuê cao hơn
+
+-   Ta cũng có thể thấy thứ Ba và thứ Tư là những ngày làm việc trong tuần.
+    Khi ngày lễ trùng vào những ngày này, nhiều người có thể sử dụng thời gian nghỉ để tham gia các hoạt động ngoài trời, du lịch ngắn ngày hoặc đơn giản là thư giãn =\> sử dụng xe đạp tương đối lớn.
+
+### 3.3.7 Biểu đồ tất cả các biến định lượng so với số lượng xe đạp thuê.
+
+```{r}
+multi.scatter <- function(data, target) {
+  # Initialize an empty list to store plots
+  plots <- list()
+
+  # Loop through each numeric variable
+  for (col in names(data)) {
+    # Check if current variable is numeric and not the target variable
+    if (is.numeric(data[[col]]) && col != target) {
+      # Create scatter plot
+      scatter_plot <- ggplot(data, aes_string(x = col, y = target)) +
+        geom_point(size = 2, color = "blue") +
+        ggtitle(paste(col, "vs.", target)) +
+        theme_minimal()
+
+      # Add the plot to the list
+      plots[[col]] <- scatter_plot
+    }
+  }
+
+  # Arrange plots in a grid
+  grid.arrange(grobs = plots, ncol = 3)  # Adjust ncol as needed
+
+  # Return the list of plots (optional)
+  return(plots)
+}
+
+# Call the function with numeric columns and target variable
+multi.scatter(data, "rented_bike_count")
+```
+
+=\> Nhận xét: Hầu hết tất cả các định lượng thể hiện thông tin môi trường bên ngoài điều chỉ là tuyến tính yếu, ngoài ra còn có độc lập tuyến tính.
+
+### 3.3.8 Correlation Matrix
+
+```{r}
+numeric_data <- data[, sapply(data, is.numeric)]
+correlation_matrix <- cor(numeric_data)
+
+# Load the corrplot package
+library(corrplot)
+
+# Plot the correlation matrix
+corrplot(correlation_matrix, method = "shade",tl.cex = 0.5)
+```
+
+```{r}
+# Function to create histograms
+multi.hist <- function(data) {
+  # Initialize an empty list to store plots
+  plots <- list()
+  
+  # Loop through each numeric variable
+  for (col in names(data)) {
+    # Create histogram plot
+    hist_plot <- ggplot(data, aes_string(x = col)) +
+      geom_histogram(fill = "skyblue", color = "black", bins = 20) +  # Customize fill and color
+      ggtitle(paste("Histogram of", col)) +
+      theme_minimal()
+    
+    # Add the plot to the list
+    plots[[col]] <- hist_plot
+  }
+  
+  # Arrange plots in a grid
+  grid.arrange(grobs = plots, ncol = 3)  # Adjust ncol as needed
+  
+  # Return the list of plots (optional)
+  return(plots)
+}
+
+# Call the function with numeric columns of 'bike'
+multi.hist(data[, sapply(data, is.numeric)])
+```
+
+**=\> Nhận xét:** các thuộc tính không tuân theo phân phối chuẩn.
+
+## 3.4 Bảng Tổng hợp theo Giờ trong Ngày
+
+```{r}
+summary_hour <- data %>%
+  group_by(hour) %>%
+  summarize(
+    total_bike_count = sum(rented_bike_count),
+    mean_bike_count = mean(rented_bike_count),
+    median_bike_count = median(rented_bike_count),
+    max_bike_count = max(rented_bike_count),
+    min_bike_count = min(rented_bike_count)
+  )
+print(summary_hour)
+```
+
+=\> **Nhận xét**: Bảng cho biết tổng số, trung bình, trung vị, giá trị lớn nhất và nhỏ nhất của số lượng xe đạp thuê theo từng giờ trong ngày.
+Giúp xác định giờ cao điểm và giờ thấp điểm.
+
+### 3.4.1 Bảng Tổng hợp theo Ngày trong Tuần
+
+```{r}
+data$day_of_week <- weekdays(as.Date(data$date, format="%d/%m/%Y"))
+
+summary_day_of_week <- data %>%
+  group_by(day_of_week) %>%
+  summarize(
+    total_bike_count = sum(rented_bike_count),
+    mean_bike_count = mean(rented_bike_count),
+    median_bike_count = median(rented_bike_count),
+    max_bike_count = max(rented_bike_count),
+    min_bike_count = min(rented_bike_count)
+  )
+
+print(summary_day_of_week)
+
+```
+
+=\> Kết quả sẽ cho thấy sự khác biệt về nhu cầu thuê xe đạp giữa các ngày trong tuần.
+
+### 3.4.2 Bảng Tổng hợp theo Mùa
+
+```{r}
+summary_season <- data %>%
+  group_by(seasons) %>%
+  summarize(
+    total_bike_count = sum(rented_bike_count),
+    mean_bike_count = mean(rented_bike_count),
+    median_bike_count = median(rented_bike_count),
+    max_bike_count = max(rented_bike_count),
+    min_bike_count = min(rented_bike_count)
+  )
+
+print(summary_season)
+```
+
+=\> Kết quả sẽ cho thấy sự khác biệt về nhu cầu thuê xe đạp giữa các mùa.
+Ví dụ, mùa hè có thể có nhu cầu cao hơn mùa đông.
+
+### 3.4.3 Bảng Tổng hợp theo Ngày Lễ
+
+```{r}
+summary_holiday <- data %>%
+  group_by(holiday) %>%
+  summarize(
+    total_bike_count = sum(rented_bike_count),
+    mean_bike_count = mean(rented_bike_count),
+    median_bike_count = median(rented_bike_count),
+    max_bike_count = max(rented_bike_count),
+    min_bike_count = min(rented_bike_count)
+  )
+
+print(summary_holiday)
+
+```
+
+Kết quả sẽ cho thấy sự khác biệt về nhu cầu thuê xe đạp giữa các ngày lễ và ngày thường.
+
+### 3.4.4 Bảng Tổng hợp theo Nhiệt độ
+
+```{r}
+data$temp_range <- cut(data$temperature_c, breaks = seq(floor(min(data$temperature_c)), ceiling(max(data$temperature_c)), by = 5))
+
+summary_temp <- data %>%
+  group_by(temp_range) %>%
+  summarize(
+    total_bike_count = sum(rented_bike_count),
+    mean_bike_count = mean(rented_bike_count),
+    median_bike_count = median(rented_bike_count),
+    max_bike_count = max(rented_bike_count),
+    min_bike_count = min(rented_bike_count)
+  )
+data <- data |> dplyr::select(-temp_range)
+print(summary_temp)
+
+```
+
+Kết quả sẽ cho thấy mối quan hệ giữa nhiệt độ và số lượng xe đạp thuê.
+Điều này có thể giúp dự đoán nhu cầu thuê xe đạp dựa trên dự báo thời tiết.
+
+=\> Những bảng tổng hợp và biểu đồ này sẽ cung cấp cái nhìn tổng quan và chi tiết về các yếu tố ảnh hưởng đến nhu cầu thuê xe đạp, giúp đưa ra các quyết định quản lý và phát triển dịch vụ hiệu quả hơn.
+
+# 5. A/B Testing
+
+## 5.1 Phân loại dữ liệu thành hai nhóm: Holiday và No Holiday
+
+```{r}
+ggplot(data, aes(x = holiday, y = rented_bike_count, fill = holiday)) +
+  geom_violin() +
+  geom_boxplot(width = 0.15) +
+  scale_fill_manual(breaks = c("Holiday", "No Holiday"),
+                    values = c("forestgreen", "skyblue")) +
+  labs(x = "Holiday", y = "Rented Bike Count") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+```
+
+**Nhóm A:** Dữ liệu vào các ngày không phải là ngày nghỉ lễ.
+
+**Nhóm B:** Dữ liệu vào các ngày nghỉ lễ.
+
+Thông qua bảng tổng hợp và biểu đổ violin, một giả định có thể là “Số lượng sử dụng xe đạp vào những ngày No Holiday là nhiều hơn những ngày Holiday”.
+
+Do đó, ta cần kiểm chứng giả thuyết và đối thuyết sau:
+
+-   Giả thuyết: µA = µB
+
+-   Đối thuyết: µA \< µB
+
+```{r}
+summary_data <- data %>%
+  group_by(holiday) %>%
+  summarise(
+    n = n(),
+    mean_rented_bike_count = mean(rented_bike_count, na.rm = TRUE),
+    sd_rented_bike_count = sd(rented_bike_count, na.rm = TRUE)
+  )
+print(summary_data)
+```
+
+```{r}
+perm_fun <- function(x, nA, nB, R) {
+n <- nA + nB
+mean_diff <- numeric(R)
+for (i in 1:R){
+idx_a <- sample(x = 1:n, size = nA)
+idx_b <- setdiff(x = 1:n, y = idx_a)
+mean_diff[i] <- mean(x[idx_a]) - mean(x[idx_b])
+}
+return(mean_diff)
+}
+set.seed(42)
+diff_mean_perm <- perm_fun(data$rented_bike_count, nA = 8328 , nB = 432  , R = 10000)
+mean_a <- mean(data$rented_bike_count[data$holiday == 'Holiday'])
+mean_b <- mean(data$rented_bike_count [data$holiday == 'No Holiday'])
+mean(diff_mean_perm < (mean_a - mean_b))
+
+```
+
+Với mức ý nghĩa α = 0, kết quả cho thấy Giả thuyết là không thể bị bác bỏ.
+Do đó, số lượng sử dụng xe đối với những ngày No Holiday nhiều hơn so với nhứng ngày Holiday là không có ý nghĩa thống kê, hay chỉ là kết quả của sự ngẫu nhiên.
+
+## 5.2 Season
+
+```{r}
+# Thực hiện nhóm dữ liệu theo 'seasons' và tính toán các giá trị
+summary_seasons <- data %>%
+  group_by(seasons) %>%
+  summarise(
+    n = n(),
+    mean_rented_bike_count = mean(rented_bike_count, na.rm = TRUE),
+    sd_rented_bike_count = sd(rented_bike_count, na.rm = TRUE)
+  )
+print(summary_seasons)
+```
+
+```{r}
+ggplot(data, aes(x = seasons, y = rented_bike_count, fill = seasons)) +
+  geom_violin() +
+  geom_boxplot(width = 0.15) +
+  labs(x = "Rented bike count", y = "Seasons") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+library(lmPerm)
+
+set.seed(56)
+out_aov_1 <- aovp(formula = rented_bike_count ~ seasons, 
+                  data = data |> mutate(across(seasons, as.factor)))
+summary(out_aov_1)
+```
+
+=\> Giá trị p-value rất nhỏ (\< 2.2e-16) cho thấy sự khác biệt về số lượng xe đạp thuê giữa các mùa là có ý nghĩa thống kê.
+Điều này có nghĩa là các mùa khác nhau ảnh hưởng đến số lượng xe đạp thuê một cách đáng kể.
+
+## 5.3 Ngày trong tuần.
+
+```{r}
+# Thực hiện nhóm dữ liệu theo 'day_of_week' và tính toán các giá trị
+summary_seasons <- data %>%
+  group_by(day_of_week) %>%
+  summarise(
+    n = n(),
+    mean_rented_bike_count = mean(rented_bike_count, na.rm = TRUE),
+    sd_rented_bike_count = sd(rented_bike_count, na.rm = TRUE)
+  )
+print(summary_seasons)
+```
+
+```{r}
+ggplot(data, aes(x = day_of_week, y = rented_bike_count, fill = day_of_week)) +
+  geom_violin() +
+  geom_boxplot(width = 0.15) +
+  labs(x = "Rented bike count", y = "Seasons") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r}
+set.seed(69)
+
+# Thực hiện phân tích ANOVA với dữ liệu đã được xử lý
+out_aov_2<- aovp(formula = rented_bike_count ~ day_of_week, data = data, perm = "Prob")
+summary(out_aov_2)
+
+```
+
+=\> Phân tích cho thấy rằng có sự khác biệt đáng kể (p \< 2.2e-16) về số lượng xe đạp được thuê giữa các ngày trong tuần (các nhóm của biến day_of_week).
+
+# 6. Model
+
+## 6.1 Model dự đoán số xe trong ngày.
+
+### 6.1.1 Feature engineering.
+
+```{r}
+data_model1 <- data
+# Số hóa các giá trị categorical bằng mutate và case_when
+data_model1 <- data_model1 |>
+  mutate(
+    seasons = case_when(
+      seasons == "Autumn" ~ 1,
+      seasons == "Spring" ~ 2,
+      seasons == "Summer" ~ 3,
+      seasons == "Winter" ~ 4,
+      TRUE ~ NA_real_
+    ),
+    holiday = case_when(
+      holiday == "Holiday" ~ 1,
+      holiday == "No Holiday" ~ 2,
+      TRUE ~ NA_real_
+    ),
+    day_of_week = case_when(
+      day_of_week == "Monday" ~ 1,
+      day_of_week == "Tuesday" ~ 2,
+      day_of_week == "Wednesday" ~ 3,
+      day_of_week == "Thursday" ~ 4,
+      day_of_week == "Friday" ~ 5,
+      day_of_week == "Saturday" ~ 6,
+      day_of_week == "Sunday" ~ 7,
+      TRUE ~ NA_real_
+    )
+  )
+data_model1 <- dummy_cols(data_model1, select_columns = c("hour", "seasons"), 
+                            remove_first_dummy = TRUE, 
+                            remove_selected_columns = TRUE)
+data_model1 <- data_model1 |> janitor::clean_names()
+data_model1 <- data_model1 |> dplyr::select(-c(date, day, day_of_week, month))
+
+```
+
+### 6.1.2 Xây dựng mô hình cơ bản.
+
+```{r}
+model_1 <- lm(rented_bike_count ~ ., data = data_model1)
+summary(model_1)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(model_1 , which=1:4)
+```
+
+Nhận thấy mô hình có nhiều biến không có ý nghĩa thông kê và
+
+### 6.1.3 Select feature.
+
+Sử dụng phương pháp hồi quy từng bước kết hợp với CV.
+
+```{r}
+# Tạo hàm predict cho regsubsets
+predict.regsubsets <- function(object, newdata, id_model){
+  form <- as.formula(object$call[[2]])
+  x_mat <- model.matrix(form, newdata)
+  coef_est <- coef(object, id = id_model)
+  x_vars <- names(coef_est)
+  x_mat <- x_mat[, x_vars, drop = FALSE]  # Đảm bảo rằng x_mat có các biến cần thiết
+  res <- x_mat %*% coef_est
+  return(as.numeric(res))
+}
+
+n_data_model1 <- nrow(data_model1)
+k <- 5
+set.seed(21)
+folds <- sample(rep(1:k, length = n_data_model1))
+
+# Đảm bảo rằng số lượng tối đa các biến dự đoán không vượt quá số biến thực tế
+nvmax_actual <- min(37, ncol(data_model1) - 1)
+cv_error_model1_rj <- matrix(0, nrow = k, ncol = nvmax_actual)
+
+for(r in 1:k){
+  data_model1_train_r <- data_model1[folds != r, ]
+  data_model1_test_r <- data_model1[folds == r, ]
+  
+  out_subset_model1_folds <- regsubsets(x = rented_bike_count ~ ., data = data_model1_train_r,
+                                        method = "exhaustive", nvmax = nvmax_actual)
+  
+  for(j in 1:nvmax_actual){
+    pred_rj <- predict.regsubsets(out_subset_model1_folds,
+                                  newdata = data_model1_test_r, id_model = j)
+    cv_error_model1_rj[r, j] <- sqrt(mean((data_model1_test_r$rented_bike_count - pred_rj)^2))
+  }
+}
+
+cv_error_model1 <- colMeans(cv_error_model1_rj)
+ggplot(data = data.frame(x = c(1:36), y = cv_error_model1),
+  mapping = aes(x = x, y = y)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Number of predictors", y = "RMSE") +
+  theme_bw()
+```
+
+Nhận thấy khi ta dùng càng nhiều thuộc tính thì RMSE càng giảm, điều này không có ý nghĩa gì cả cho việc chọn lựa thuộc tính, nên ta sẽ dùng hồi quy từng phần với tiêu chí BIC.
+
+```{r}
+data_model1 <- data_model1
+regsubset <- regsubsets(x = rented_bike_count ~ ., data = data_model1, nvmax = 36,
+                                  method = "exhaustive")
+
+reg_summary <- summary(regsubset)
+
+# Tiêu chí Mallow's Cp
+best_model_cp <- which.min(reg_summary$cp)
+
+# Tiêu chí BIC
+best_model_bic <- which.min(reg_summary$bic)
+
+# Tiêu chí Adjusted R²
+best_model_adjr2 <- which.max(reg_summary$adjr2)
+
+# Hiển thị số lượng biến tốt nhất dựa trên các tiêu chí
+cat("Số lượng biến tốt nhất dựa trên tiêu chí Mallow's Cp:", best_model_cp, "\n")
+cat("Số lượng biến tốt nhất dựa trên tiêu chí BIC:", best_model_bic, "\n")
+
+# Lấy các biến của mô hình tốt nhất dựa trên tiêu chí Mallow's Cp
+best_features_cp <- names(coef(regsubset, best_model_cp))
+cat("Các biến tốt nhất dựa trên tiêu chí Mallow's Cp:", best_features_cp, "\n")
+
+# Lấy các biến của mô hình tốt nhất dựa trên tiêu chí BIC
+best_features_bic <- names(coef(regsubset, best_model_bic))
+cat("Các biến tốt nhất dựa trên tiêu chí BIC:", best_features_bic, "\n")
+
+```
+
+```{r}
+library(glmnet)
+x <- model.matrix(sum_bike_count ~ ., data_model2)[,-1]
+y <- data_model2$sum_bike_count
+lasso_model <- cv.glmnet(x, y, alpha = 1)
+print(lasso_model)
+
+```
+
+```{r}
+# Hợp nhất các biến của cả 3 tiêu chí
+all_best_features <- unique(c(best_features_cp, best_features_bic))
+
+# Hiển thị tổng hợp các biến từ 3 tiêu chí
+cat("Tổng hợp các biến từ 2 tiêu chí:", all_best_features, "\n")
+```
+
+### 6.1.4 Building model
+
+Xây dựng mô hình mới với các thuộc tình vừa tìm được.
+
+```{r}
+# Tạo công thức hồi quy tuyến tính
+formula <- as.formula(paste("rented_bike_count ~", paste(all_best_features[-1], collapse = " + ")))
+
+# Xây dựng mô hình hồi quy tuyến tính
+model_1 <- lm(formula, data = data_model1)
+summary(model_1)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(model_1 , which=1:4)
+```
+
+Nhận thấy đồ thị thặng dư khá vẻ tốt hơn và các biến trong mô hình điều có ý nghĩa thống kê, nhưng vẫn chưa tốt nên ta sẽ thực hiện thêm việc mở rộng mô hình.
+
+### 6.1.5 Mở rộng mô hình.
+
+```{r}
+knots_temperature_c <- quantile(data_model1$temperature_c, probs = c(0.25, 0.75))
+
+model_1_expand <- lm(formula = rented_bike_count ~ 
+                       bs(temperature_c, knots = knots_temperature_c, degree = 2) + 
+                       poly(humidity_percent, 2) +
+                       poly(dew_point_temperature_c, 3) + 
+                       poly(rainfall_mm, 2) + holiday + year + hour_1 + 
+                       hour_2 + hour_3 + hour_4 + hour_5 + 
+                       hour_6  + hour_8 + hour_10 + 
+                       hour_11 + hour_12 + hour_13 + hour_14 + 
+                       hour_17 + hour_18 + hour_19 + 
+                       hour_20 + hour_21  + 
+                       seasons_2 + seasons_3 + seasons_4, data = data_model1)
+summary(model_1_expand)
+```
+
+```{r}
+par(mfrow = c(2, 2))  # Hiển thị 4 đồ thị cùng một lúc
+
+# Residuals vs Fitted
+plot(model_1_expand, which = 1, main = "Residuals vs Fitted")
+
+# Normal Q-Q
+plot(model_1_expand, which = 2, main = "Normal Q-Q")
+
+# Scale-Location
+plot(model_1_expand, which = 3, main = "Scale-Location")
+
+# Residuals vs Leverage
+plot(model_1_expand, which = 5, main = "Residuals vs Leverage")
+
+par(mfrow = c(1, 1))  # Trở về chế độ hiển thị mặc định
+```
+
+**Nhận xét:**
+
+-   Theo đồ thị **Residuals vs Fitted Values:** Điều này có thể chỉ ra rằng mô hình hồi quy tuyến tính không phù hợp.
+
+-   Theo đồ thị **Normal Q-Q Plot:** Thặng dư không có phân phối chuẩn, không ứng giả định normality của thặng dư.
+
+Nhận thấy mô hình không được tốt cho lắm, việc tiếp cận mô hình cũng không hay, nên ta thực hiện một hướng tiếp cận khác của dữ liệu để kiểm tra.
+
+## 6.2 Model dự đoán số xe theo ngày.
+
+### 6.2.1 Feature engineering.
+
+```{r}
+data_model2 <- data |> dplyr::select(-c(hour, day, month))
+data_model2 <- data_model2 |>
+  mutate(
+    seasons = case_when(
+      seasons == "Autumn" ~ 1,
+      seasons == "Spring" ~ 2,
+      seasons == "Summer" ~ 3,
+      seasons == "Winter" ~ 4,
+      TRUE ~ NA_real_
+    ),
+    holiday = case_when(
+      holiday == "Holiday" ~ 1,
+      holiday == "No Holiday" ~ 2,
+      TRUE ~ NA_real_
+    ),
+    day_of_week = case_when(
+      day_of_week == "Monday" ~ 1,
+      day_of_week == "Tuesday" ~ 2,
+      day_of_week == "Wednesday" ~ 3,
+      day_of_week == "Thursday" ~ 4,
+      day_of_week == "Friday" ~ 5,
+      day_of_week == "Saturday" ~ 6,
+      day_of_week == "Sunday" ~ 7,
+      TRUE ~ NA_real_
+    )
+  )
+data_model2 <- data_model2 |>
+  group_by(date) |>
+  dplyr::summarise(sum_bike_count = sum(rented_bike_count),
+            mean_humidity = mean(humidity_percent),
+            mean_wind_speed = mean(wind_speed_m_s),
+            mean_visibility = mean(visibility_10m),
+            mean_tempature = mean(temperature_c),
+            mean_dew_point_temp = mean(dew_point_temperature_c),
+            mean_solar_radiation = mean(solar_radiation_mj_m2),
+            mean_rainfall = mean(rainfall_mm),
+            mean_snowfall = mean(snowfall_cm),
+            seasons = mean(seasons),
+            day_of_week = mean(day_of_week),
+            holiday = mean(holiday)
+            ) 
+head(data_model2)
+```
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+
+numeric_columns <- sapply(data_model2, is.numeric)
+numeric_data <- data_model2[, numeric_columns]
+
+num_cols <- ceiling(sqrt(sum(numeric_columns)))
+num_rows <- ceiling(sum(numeric_columns) / num_cols)
+
+
+
+# Tạo danh sách các biểu đồ histogram
+plots <- lapply(names(numeric_data), function(col) {
+  ggplot(numeric_data, aes_string(x = col)) +
+    geom_histogram(binwidth = 30, fill = "lightblue", color = "white") +
+    ggtitle(col)
+})
+
+# Sắp xếp các biểu đồ theo dạng lưới
+do.call(grid.arrange, c(plots, ncol = num_cols))
+
+```
+
+```{r}
+correlation_matrix <- cor(numeric_data)
+
+# Plot the correlation matrix
+corrplot(correlation_matrix, method = "shade",tl.cex = 0.5)
+```
+
+```{r}
+multi.scatter <- function(data, target) {
+  # Initialize an empty list to store plots
+  plots <- list()
+
+  # Loop through each numeric variable
+  for (col in names(data)) {
+    # Check if current variable is numeric and not the target variable
+    if (is.numeric(data[[col]]) && col != target) {
+      # Create scatter plot
+      scatter_plot <- ggplot(data, aes_string(x = col, y = target)) +
+        geom_point(size = 2, color = "blue") +
+        ggtitle(paste(col, "vs.", target)) +
+        theme_minimal()
+
+      # Add the plot to the list
+      plots[[col]] <- scatter_plot
+    }
+  }
+
+  # Arrange plots in a grid
+  grid.arrange(grobs = plots, ncol = 3)  # Adjust ncol as needed
+
+  # Return the list of plots (optional)
+  return(plots)
+}
+
+# Call the function with numeric columns and target variable
+multi.scatter(data_model2, "sum_bike_count")
+```
+
+### 6.2.2 Xây dựng mô hình cơ bản.
+
+```{r}
+data_model2 <- data_model2 |> dplyr::select(-date)
+model_2 <- lm(sum_bike_count ~ ., data = data_model2 )
+summary(model_2)
+```
+
+```{r}
+# Tạo dữ liệu mới để dự đoán
+new_data <- data.frame(
+  mean_humidity = c(50, 60),
+  mean_wind_speed = c(3, 5),
+  mean_visibility = c(10, 15),
+  mean_tempature = c(20, 22),
+  mean_dew_point_temp = c(10, 12),
+  mean_solar_radiation = c(200, 250),
+  mean_rainfall = c(0, 0.5),
+  mean_snowfall = c(0, 0),
+  seasons = c(1, 2),
+  day_of_week = c(3, 4),
+  holiday = c(0, 1)
+)
+
+# Thực hiện dự đoán và tính khoảng tin cậy
+predictions <- predict(model_2, newdata = new_data, interval = "confidence", level=0.95)
+
+# Hiển thị kết quả
+print(predictions)
+```
+
+```{r}
+predictions <- predict(model_2, newdata = data_model2, interval = "confidence", level = 0.95)
+
+# Giá trị thực tế
+actual_values <- data_model2$sum_bike_count
+
+# Tính sai số tuyệt đối giữa giá trị thực tế và giá trị dự đoán (fit)
+absolute_errors <- abs(actual_values - predictions[, "fit"])
+
+# Tính trung bình sai số tuyệt đối (MAE)
+mae <- mean(absolute_errors)
+
+mae <- mean(absolute_errors)
+
+# Sử dụng phương pháp bootstrap để tính khoảng tin cậy cho MAE
+set.seed(123)  # Đặt seed để kết quả có thể tái lập
+bootstrap_samples <- 1000  # Số lượng mẫu bootstrap
+bootstrap_mae <- numeric(bootstrap_samples)
+
+for (i in 1:bootstrap_samples) {
+  sample_indices <- sample(seq_len(nrow(data_model2)), replace = TRUE)
+  sample_actual_values <- actual_values[sample_indices]
+  sample_predictions <- predictions[sample_indices, "fit"]
+  sample_absolute_errors <- abs(sample_actual_values - sample_predictions)
+  bootstrap_mae[i] <- mean(sample_absolute_errors)
+}
+
+# Tính khoảng tin cậy 95% cho MAE
+ci <- quantile(bootstrap_mae, probs = c(0.025, 0.975))
+
+# Hiển thị kết quả
+print(paste("Mean Absolute Error (MAE):", mae))
+print(paste("95% Confidence Interval for MAE:", ci[1], "-", ci[2]))
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(model_3 , which=1:4)
+```
+
+### 6.2.3 Select feature.
+
+Sử dụng phương pháp hồi quy từng bước.
+
+```{r}
+# Tạo hàm predict cho regsubsets
+predict.regsubsets <- function(object, newdata, id_model){
+  form <- as.formula(object$call[[2]])
+  x_mat <- model.matrix(form, newdata)
+  coef_est <- coef(object, id = id_model)
+  x_vars <- names(coef_est)
+  x_mat <- x_mat[, x_vars, drop = FALSE]  # Đảm bảo rằng x_mat có các biến cần thiết
+  res <- x_mat %*% coef_est
+  return(as.numeric(res))
+}
+
+n_data_model2 <- nrow(data_model2)
+k <- 5
+set.seed(21)
+folds <- sample(rep(1:k, length = n_data_model2))
+
+# Đảm bảo rằng số lượng tối đa các biến dự đoán không vượt quá số biến thực tế
+nvmax_actual <- min(13, ncol(data_model2) - 1)
+cv_error_model2_rj <- matrix(0, nrow = k, ncol = nvmax_actual)
+
+for(r in 1:k){
+  data_model2_train_r <- data_model2[folds != r, ]
+  data_model2_test_r <- data_model2[folds == r, ]
+  
+  out_subset_model2_folds <- regsubsets(x = sum_bike_count ~ ., data = data_model2_train_r,
+                                        method = "exhaustive", nvmax = nvmax_actual, really.big = TRUE)
+  
+  for(j in 1:nvmax_actual){
+    pred_rj <- predict.regsubsets(out_subset_model2_folds,
+                                  newdata = data_model2_test_r, id_model = j)
+    cv_error_model2_rj[r, j] <- sqrt(mean((data_model2_test_r$sum_bike_count - pred_rj)^2))
+  }
+}
+
+cv_error_model2 <- colMeans(cv_error_model2_rj)
+ggplot(data = data.frame(x = c(1:nvmax_actual), y = cv_error_model2),
+  mapping = aes(x = x, y = y)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Number of predictors", y = "RMSE") +
+  theme_bw()
+```
+
+Việc sử dụng RMSE không thấy được số lượng thuộc tính hợp lý, nên ta sẽ chuyển sang phương pháp khác.
+
+```{r}
+data_model2 <- data_model2
+regsubset <- regsubsets(x = sum_bike_count ~ ., data = data_model2, nvmax = 15,
+                                  method = "exhaustive")
+
+reg_summary <- summary(regsubset)
+
+# Tiêu chí Mallow's Cp
+best_model_cp <- which.min(reg_summary$cp)
+
+# Tiêu chí BIC
+best_model_bic <- which.min(reg_summary$bic)
+
+# Tiêu chí Adjusted R²
+best_model_adjr2 <- which.max(reg_summary$adjr2)
+
+# Hiển thị số lượng biến tốt nhất dựa trên các tiêu chí
+cat("Số lượng biến tốt nhất dựa trên tiêu chí Mallow's Cp:", best_model_cp, "\n")
+cat("Số lượng biến tốt nhất dựa trên tiêu chí BIC:", best_model_bic, "\n")
+
+# Lấy các biến của mô hình tốt nhất dựa trên tiêu chí Mallow's Cp
+best_features_cp <- names(coef(regsubset, best_model_cp))
+cat("Các biến tốt nhất dựa trên tiêu chí Mallow's Cp:", best_features_cp, "\n")
+
+# Lấy các biến của mô hình tốt nhất dựa trên tiêu chí BIC
+best_features_bic <- names(coef(regsubset, best_model_bic))
+cat("Các biến tốt nhất dựa trên tiêu chí BIC:", best_features_bic, "\n")
+
+
+```
+
+```{r}
+library(glmnet)
+x <- model.matrix(sum_bike_count ~ ., data_model2)[,-1]
+y <- data_model2$sum_bike_count
+lasso_model <- cv.glmnet(x, y, alpha = 1)
+print(lasso_model)
+```
+
+```{r}
+# Hợp nhất các biến của cả 3 tiêu chí
+all_best_features <- unique(c(best_features_cp, best_features_bic))
+
+# Hiển thị tổng hợp các biến từ 3 tiêu chí
+cat("Tổng hợp các biến từ 2 tiêu chí:", all_best_features, "\n")
+```
+
+### 6.2.4 Building model
+
+```{r}
+# Tạo công thức hồi quy tuyến tính
+formula <- as.formula(paste("sum_bike_count ~", paste(all_best_features[-1], collapse = " + ")))
+
+# Xây dựng mô hình hồi quy tuyến tính
+model_2 <- lm(formula, data = data_model2)
+summary(model_2)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(model_2 , which=1:4)
+```
+
+### 6.2.5 Mở rộng mô hình.
+
+```{r}
+knots_mean_solar_radiation<- quantile(data_model2$mean_solar_radiation, probs = c(0.5))
+
+model_2_expand <- lm(sum_bike_count ~ mean_humidity +  
+                       mean_wind_speed + 
+                       bs(mean_solar_radiation, knots = knots_mean_solar_radiation, degree = 2) +
+                       poly(mean_dew_point_temp, degree = 3) + 
+                       poly(mean_rainfall, degree = 2) + 
+                       poly(seasons, 2) + 
+                       holiday, data = data_model2
+    )
+summary(model_2_expand)
+
+```
+
+```{r}
+# Kiểm tra sự độ lập thặng dư của mô hình
+par(mfrow = c(2, 2))  # Hiển thị 4 đồ thị cùng một lúc
+
+# Residuals vs Fitted
+plot(model_2_expand, which = 1, main = "Residuals vs Fitted")
+
+# Normal Q-Q
+plot(model_2_expand, which = 2, main = "Normal Q-Q")
+
+# Scale-Location
+plot(model_2_expand, which = 3, main = "Scale-Location")
+
+# Residuals vs Leverage
+plot(model_2_expand, which = 5, main = "Residuals vs Leverage")
+
+par(mfrow = c(1, 1))  # Trở về chế độ hiển thị mặc định
+
+
+```
+
+**Nhận xét:**
+
+-   Theo đồ thị **Residuals vs Fitted Values:** Điều này cho thấy rằng mối quan hệ tuyến tính là hợp lý và giả định homoscedasticity (phương sai đồng nhất) được đáp ứng.
+
+-   Theo đồ thị **Normal Q-Q Plot:** Thặng dư có phân phối gần với phân phối chuẩn, đáp ứng giả định normality của thặng dư.
+
+-   Theo đồ thị **Scale-Location Plot:** Dù có mở rộng mô hình nhưng đường nằm ngang không hoàn toàn, thế nên có thể sử dụng mô hình phi tiến có thể sẽ tốt hơn.
+
+```{r}
+# Kiểm tra đa cộng tuyến (VIF)
+library(car)
+vif(model_2_expand)
+
+```
+
+**Nhận xét:** `GVIF^(1/(2*Df))` của tất cả các biến đều dưới 2, cho thấy không có vấn đề đa cộng tuyến nghiêm trọng giữa các biến độc lập.
+Điều này có nghĩa là các biến không bị phụ thuộc tuyến tính lẫn nhau một cách đáng kể và mô hình có độ ổn định cao.
+
+```{r}
+# Kiểm tra Normality
+shapiro.test(residuals(model_2_expand))
+
+```
+
+**Nhận xét:** P-value \> 0.05 cho thấy thặng dư có phân phối gần với phân phối chuẩn.
+Điều này đáp ứng giả định normality của thặng dư, cho phép sử dụng các kiểm định thống kê tiếp theo và tăng độ tin cậy của các ước lượng từ mô hình.
+
+```{r}
+summary(model_2_expand)$coefficients
+
+```
+
+**Nhận xét:**
+
+-   **Hệ số ước lượng (Estimate)**:
+
+    -   `mean_humidity`: Hệ số này âm (-166.9517) cho thấy rằng khi độ ẩm trung bình tăng, số lượng xe đạp thuê giảm.
+
+    -   `mean_wind_speed`: Hệ số này âm (-971.2965) cho thấy rằng khi tốc độ gió tăng, số lượng xe đạp thuê giảm.
+
+    -   `holiday`: Hệ số này dương (3536.9579) cho thấy rằng vào ngày nghỉ lễ, số lượng xe đạp thuê tăng
+
+-   **Giá trị t và p-value**:
+
+    -   Tất cả các biến trong mô hình đều có giá trị p-value nhỏ hơn 0.05, cho thấy rằng chúng có ý nghĩa thống kê trong mô hình.
+
+-   **Phân tích các thành phần hàm cơ sở (bs) và đa thức (poly)**:
+
+    -   `bs(mean_solar_radiation, knots = knots_mean_solar_radiation, degree = 2)`: Các hệ số này đều có ý nghĩa thống kê cao (p-value rất nhỏ), cho thấy rằng biến `mean_solar_radiation` có ảnh hưởng phi tuyến tính đáng kể đến số lượng xe đạp thuê.
+
+    -   `poly(mean_dew_point_temp, degree = 3)`: Tương tự, các hệ số này cũng có ý nghĩa thống kê cao, cho thấy rằng `mean_dew_point_temp` có ảnh hưởng phi tuyến tính quan trọng.
+
+    -   `poly(mean_rainfall, degree = 2)` và `poly(seasons, 2)`: Các hệ số này cũng có ý nghĩa thống kê, cho thấy rằng các biến này có ảnh hưởng phi tuyến tính đến số lượng xe đạp thuê.
+
+# 7. Tổng kết.
+
+## 7.1 Tình hình sử dụng xe đạp thuê tại Seoul.
+
+Từ các bảng, đồ thị phân phối đã trình bày ở trên, ta có kết luận rằng.
+
+Dữ liệu từ dịch vụ cho thuê xe đạp ở Seoul từ 01/12/2017 đến 30/11/2018 tiết lộ rằng số lượng xe đạp thuê biến đổi theo giờ trong ngày, với cao điểm từ 7 giờ sáng đến 9 giờ sáng và tăng trở lại sau 15:00 chiều.
+Về mặt thời gian trong năm, tháng 6 có số lượng thuê cao nhất, trong khi tháng 1 và tháng 12 ghi nhận số lượng thuê thấp nhất.
+Vào mùa hè, nhu cầu thuê xe đạp tăng lên nhờ thời tiết thuận lợi, trong khi mùa đông có nhu cầu thấp nhất do thời tiết lạnh và tuyết.
+Thú vị là mùa thu có nhu cầu xe đạp cao hơn mùa xuân, có thể do số ngày mưa ít hơn.
+
+Nhu cầu xe đạp cũng cao hơn vào những ngày làm việc so với ngày nghỉ lễ, cho thấy rằng người dân thường thuê xe đạp vì các lý do khác ngoài mục đích giải trí.
+Cuối tuần, đặc biệt khi trùng với ngày lễ, số lượng thuê xe tăng cao nhờ các hoạt động ngoài trời và du lịch.
+Thời tiết tốt và các ngày lễ cuối tuần có thể làm tăng nhu cầu thuê xe.
+Đáng chú ý, hầu hết các yếu tố môi trường bên ngoài chỉ có quan hệ tuyến tính yếu, cho thấy sự phức tạp và đa dạng trong các yếu tố ảnh hưởng đến nhu cầu thuê xe đạp.
+
+## 7.2 Mô hình dự đoán.
+
+Mô hình đã chi tiết hóa mối quan hệ giữa các biến thời tiết, mùa và ngày lễ với lượng xe đạp được thuê.
+Với tỉ lệ dự đoán đúng là 85,63 % và các tham số sử dụng là là độ ẩm, mức gió, lượng mưa, sương mù, bức xạ mặt trời, thời gian, dịp lễ đặt biệt.
+
+-   Tất cả các biến trong mô hình đều có ý nghĩa thống kê (p-value \< 0.05), cho thấy chúng có tác động đáng kể đến số lượng xe đạp thuê.
+
+-   Các biến như mean_solar_radiation và mean_dew_point_temp có ảnh hưởng phi tuyến tính mạnh mẽ, được xác định bởi các hàm bs và poly với các hệ số có ý nghĩa thống kê cao.
+
+-   Thặng dư có phân phối gần với chuẩn và không có vấn đề đa cộng tuyến lớn giữa các biến, làm tăng độ tin cậy của mô hình.
+
+-   Mô hình đáp ứng được giả định về homoscedasticity và normality của thặng dư, mặc dù có sự mở rộng.
+
+Tổng kết lại, mô hình tuyến tính hiện tại đáp ứng các giả định quan trọng và có ý nghĩa thống kê.
+Tuy nhiên, một số biến có ảnh hưởng phi tuyến tính đáng kể và việc sử dụng mô hình phi tuyến có thể cải thiện độ chính xác của dự đoán.
+
+## **7.3 Chiến lược kinh doanh đề ra.**
+
+Từ những tổng kết trên, ta có thể đề xuất một số chiến lược kinh doanh sau:
+
+-   Tận dụng thời tiết và ngày lễ:
+
+    -   Mùa cao điểm (mùa xuân): Tập trung vào chiến dịch tiếp thị và quảng cáo, cung cấp các gói khuyến mãi đặc biệt cho các hoạt động ngoài trời khi nhu cầu thuê xe cao.
+
+    -   Mùa thấp điểm (mùa hè): Cung cấp các gói thuê xe dài hạn với giá cả cạnh tranh để thu hút khách du lịch.
+
+-   Chú trọng vào các yếu tố môi trường:
+
+    -   Độ ẩm và tốc độ gió: Cung cấp bảo hiểm cho thuê xe để giảm thiểu rủi ro từ thời tiết xấu.
+        Cung cấp thông tin dự báo thời tiết để hỗ trợ quyết định thuê xe của khách hàng.
+
+    -   Bức xạ mặt trời: Cung cấp nón che và các lựa chọn bảo vệ khỏi ánh nắng mặt trời.
+
+-   Chiến lược tận dụng thời tiết:
+
+    -   Thời tiết lạnh (mùa đông): Quảng cáo và khuyến mãi vào những ngày thời tiết thuận lợi để kích thích nhu cầu thuê xe.
+
+    -   Thời tiết nóng (mùa hè): Cung cấp các dịch vụ bảo vệ khỏi nắng nóng để thu hút khách hàng muốn tham gia các hoạt động ngoài trời.
+
+-   Các mùa trong năm:
+
+    -   Thiết kế chiến dịch quảng cáo và khuyến mãi dựa trên các mùa vụ để tối ưu hóa nhu cầu thuê xe đạp theo từng mùa.
+
+Tăng cường hợp tác với các sự kiện và lễ hội để nâng cao thương hiệu và thu hút khách hàng mới.
+
+# 
