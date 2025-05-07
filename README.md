@@ -1,0 +1,2 @@
+# SEOUL-PUBLIC-BIKE-RENTAL-DEMAND-FORECASTING-AND-USAGE-ANALYSIS
+This project analyzes hourly bike rental data in Seoul from December 2017 to November 2018 to uncover patterns in customer demand. It explores how factors like weather, season, holidays, and time of day influence rental counts. The goal is to support strategic planning and ensure consistent bike availability through demand forecasting.
